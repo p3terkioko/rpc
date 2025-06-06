@@ -1,13 +1,18 @@
 CC = gcc
-CFLAGS = -Wall -O2
+CFLAGS = -Wall -g -I../ # Include path for root headers
+LDFLAGS =
 
-all: server client
+# Path to common object files (expected to be in root directory)
+COMMON_OBJS = ../rpc_protocol.o ../calculator_ops.o
 
-server: server.c
-	$(CC) $(CFLAGS) -o server server.c
+TARGET_SERVER = server
 
-client: client.c
-	$(CC) $(CFLAGS) -o client client.c
+all: $(TARGET_SERVER)
+
+$(TARGET_SERVER): server.c $(COMMON_OBJS) ../rpc_protocol.h ../calculator_ops.h
+	$(CC) $(CFLAGS) -o $(TARGET_SERVER) server.c $(COMMON_OBJS) $(LDFLAGS)
 
 clean:
-	rm -f server client
+	rm -f $(TARGET_SERVER)
+
+.PHONY: all clean

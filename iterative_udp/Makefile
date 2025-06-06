@@ -1,25 +1,18 @@
-# Makefile for UDP Calculator Project
-
 CC = gcc
-CFLAGS = -Wall -g
+CFLAGS = -Wall -g -I../ # Include path for root headers
+LDFLAGS =
 
-# Executable names
-SERVER = server
-CLIENT = client
+# Path to common object files (expected to be in root directory)
+COMMON_OBJS = ../rpc_protocol.o ../calculator_ops.o
 
-# Source files
-SERVER_SRC = server.c
-CLIENT_SRC = client.c
+TARGET_SERVER = server
 
-.PHONY: all clean
+all: $(TARGET_SERVER)
 
-all: $(SERVER) $(CLIENT)
-
-$(SERVER): $(SERVER_SRC)
-	$(CC) $(CFLAGS) -o $(SERVER) $(SERVER_SRC)
-
-$(CLIENT): $(CLIENT_SRC)
-	$(CC) $(CFLAGS) -o $(CLIENT) $(CLIENT_SRC)
+$(TARGET_SERVER): server.c $(COMMON_OBJS) ../rpc_protocol.h ../calculator_ops.h
+	$(CC) $(CFLAGS) -o $(TARGET_SERVER) server.c $(COMMON_OBJS) $(LDFLAGS)
 
 clean:
-	rm -f $(SERVER) $(CLIENT)
+	rm -f $(TARGET_SERVER)
+
+.PHONY: all clean

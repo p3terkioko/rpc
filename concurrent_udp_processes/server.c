@@ -1,121 +1,155 @@
-// server.c
+// concurrent_udp_processes/server.c
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 #include <unistd.h>
-#include <arpa/inet.h>
-#include <sys/time.h>
-#include <sys/types.h>
-#include <sys/wait.h>
-#include <time.h>
+#include <sys/socket.h>
+#include <netinet/in.h>
+#include <arpa/inet.h> // For inet_ntop (optional for logging)
+#include <sys/wait.h>  // For waitpid
+#include <signal.h>    // For signal/sigaction
+#include <errno.h>     // For errno, EINTR
 
-#define PORT 9090
-#define BUF_SIZE 1024
+#include "rpc_protocol.h" // Headers from root via -I../
+#include "calculator_ops.h" // Headers from root via -I../
 
-void handle_client(struct sockaddr_in client_addr, char *initial_msg);
+#define PORT 9007 // Changed port
+#define BUF_SIZE RPC_BUFFER_SIZE
+
+// Basic SIGCHLD handler to prevent zombie processes
+void sigchld_handler(int sig) {
+    (void)sig; // Unused parameter
+    while (waitpid(-1, NULL, WNOHANG) > 0);
+}
+
+void process_client_request(int server_sockfd, const char* request_buf, ssize_t data_len, struct sockaddr_in client_addr, socklen_t client_addr_len) {
+    char response_buf[BUF_SIZE];
+    RpcRequest req;
+    RpcResponse resp;
+    CalcResult calc_res;
+
+    char current_request_copy[BUF_SIZE + 1];
+    memcpy(current_request_copy, request_buf, data_len);
+    current_request_copy[data_len] = '\0';
+
+    char client_ip_str[INET_ADDRSTRLEN];
+    inet_ntop(AF_INET, &client_addr.sin_addr, client_ip_str, INET_ADDRSTRLEN);
+    // printf("Child PID %d: Handling request from %s:%d. Data: %s\n", getpid(), client_ip_str, ntohs(client_addr.sin_port), current_request_copy);
+
+
+    strcpy(resp.server_type, "concurrent_udp_processes");
+
+    if (unmarshal_request(current_request_copy, &req) != 0) {
+        fprintf(stderr, "Child PID %d: Failed to unmarshal request from %s:%d: %s\n", getpid(), client_ip_str, ntohs(client_addr.sin_port), current_request_copy);
+        strcpy(resp.error, "Server error: Bad request format");
+        resp.result = 0;
+    } else {
+        // printf("Child PID %d: Op %d, op1 %.2f, op2 %.2f from %s:%d\n", getpid(), req.operation, req.op1, req.op2, client_ip_str, ntohs(client_addr.sin_port));
+        switch (req.operation) {
+            case OP_ADD:      calc_res = add(req.op1, req.op2); break;
+            case OP_SUBTRACT: calc_res = subtract(req.op1, req.op2); break;
+            case OP_MULTIPLY: calc_res = multiply(req.op1, req.op2); break;
+            case OP_DIVIDE:   calc_res = divide(req.op1, req.op2); break;
+            default:
+                snprintf(calc_res.error, sizeof(calc_res.error), "Invalid operation: %d", req.operation);
+                calc_res.value = 0;
+                break;
+        }
+        resp.result = calc_res.value;
+        strcpy(resp.error, calc_res.error);
+    }
+
+    memset(response_buf, 0, BUF_SIZE);
+    if (marshal_response(&resp, response_buf, BUF_SIZE) != 0) {
+        fprintf(stderr, "Child PID %d: Failed to marshal response for %s:%d.\n", getpid(), client_ip_str, ntohs(client_addr.sin_port));
+    } else {
+        ssize_t bytes_sent = sendto(server_sockfd, response_buf, strlen(response_buf), 0,
+                                    (struct sockaddr *)&client_addr, client_addr_len);
+        if (bytes_sent < 0) {
+            perror("sendto error in child process");
+        } else {
+            // printf("Child PID %d: Sent response: %s to %s:%d\n", getpid(), response_buf, client_ip_str, ntohs(client_addr.sin_port));
+        }
+    }
+    exit(EXIT_SUCCESS);
+}
+
 
 int main() {
     int sockfd;
     struct sockaddr_in server_addr, client_addr;
-    socklen_t addr_len = sizeof(client_addr);
-    char buffer[BUF_SIZE];
+    socklen_t client_addr_len;
+    char request_buf[BUF_SIZE];
 
-    // Create UDP socket
-    if ((sockfd = socket(AF_INET, SOCK_DGRAM, 0)) < 0) {
+    struct sigaction sa;
+    memset(&sa, 0, sizeof(sa));
+    sa.sa_handler = sigchld_handler;
+    sigemptyset(&sa.sa_mask);
+    sa.sa_flags = SA_RESTART | SA_NOCLDSTOP;
+    if (sigaction(SIGCHLD, &sa, 0) == -1) {
+        perror("sigaction failed for SIGCHLD");
+        exit(EXIT_FAILURE);
+    }
+
+    sockfd = socket(AF_INET, SOCK_DGRAM, 0);
+    if (sockfd < 0) {
         perror("Socket creation failed");
-        exit(1);
+        exit(EXIT_FAILURE);
+    }
+
+    int opt = 1;
+    if (setsockopt(sockfd, SOL_SOCKET, SO_REUSEADDR, &opt, sizeof(opt))) {
+        perror("setsockopt SO_REUSEADDR failed");
+        close(sockfd);
+        exit(EXIT_FAILURE);
     }
 
     memset(&server_addr, 0, sizeof(server_addr));
     server_addr.sin_family = AF_INET;
-    server_addr.sin_port = htons(PORT);
     server_addr.sin_addr.s_addr = INADDR_ANY;
+    server_addr.sin_port = htons(PORT);
 
-    // Bind the socket
-    if (bind(sockfd, (const struct sockaddr *)&server_addr, sizeof(server_addr)) < 0) {
+    if (bind(sockfd, (struct sockaddr *)&server_addr, sizeof(server_addr)) < 0) {
         perror("Bind failed");
-        exit(1);
+        close(sockfd);
+        exit(EXIT_FAILURE);
     }
 
-    printf("UDP Server listening on port %d...\n", PORT);
+    printf("Concurrent UDP Processes RPC Server listening on port %d...\n", PORT);
 
     while (1) {
-        int n = recvfrom(sockfd, buffer, BUF_SIZE, 0, (struct sockaddr *)&client_addr, &addr_len);
-        if (n < 0) continue;
+        client_addr_len = sizeof(client_addr);
+        memset(&client_addr, 0, sizeof(client_addr));
+        memset(request_buf, 0, BUF_SIZE);
 
-        buffer[n] = '\0';
+        // Read into request_buf, ensuring space for null termination if needed by child processing
+        // The child process_client_request now creates a local copy and null terminates.
+        ssize_t bytes_received = recvfrom(sockfd, request_buf, BUF_SIZE, 0,
+                                          (struct sockaddr *)&client_addr, &client_addr_len);
+
+        if (bytes_received < 0) {
+            if (errno == EINTR) continue;
+            perror("recvfrom error in main loop");
+            continue;
+        }
 
         pid_t pid = fork();
-        if (pid == 0) { // Child
-            close(sockfd);
-            handle_client(client_addr, buffer);
-            exit(0);
-        }
-        // Parent continues listening
-    }
 
-    return 0;
-}
-
-void handle_client(struct sockaddr_in client_addr, char *initial_msg) {
-    char buffer[BUF_SIZE];
-    int sockfd;
-    socklen_t addr_len = sizeof(client_addr);
-
-    if ((sockfd = socket(AF_INET, SOCK_DGRAM, 0)) < 0) {
-        perror("Child socket creation failed");
-        exit(1);
-    }
-
-    time_t start_time = time(NULL);
-    static int session_id = 0;
-    int client_id = ++session_id;
-
-    printf("Client #%d connected [%s:%d]\n", client_id,
-           inet_ntoa(client_addr.sin_addr), ntohs(client_addr.sin_port));
-
-    while (1) {
-        int choice;
-        double a, b, result;
-        sscanf(initial_msg, "%d %lf %lf", &choice, &a, &b);
-
-        if (choice == 5) {
-            snprintf(buffer, BUF_SIZE, "Client #%d disconnected gracefully.", client_id);
-            sendto(sockfd, buffer, strlen(buffer), 0, (struct sockaddr *)&client_addr, addr_len);
-            break;
+        if (pid < 0) {
+            perror("Fork failed");
+            continue;
         }
 
-        switch (choice) {
-            case 1: result = a + b; break;
-            case 2: result = a - b; break;
-            case 3: result = a * b; break;
-            case 4:
-                if (b == 0) {
-                    snprintf(buffer, BUF_SIZE, "Error: Division by zero.");
-                    sendto(sockfd, buffer, strlen(buffer), 0, (struct sockaddr *)&client_addr, addr_len);
-                    goto receive_next;
-                } else {
-                    result = a / b;
-                }
-                break;
-            default:
-                snprintf(buffer, BUF_SIZE, "Invalid operation.");
-                sendto(sockfd, buffer, strlen(buffer), 0, (struct sockaddr *)&client_addr, addr_len);
-                goto receive_next;
+        if (pid == 0) { // Child process
+            // Note: Child does not need to close sockfd as it's a datagram socket and not connection-oriented.
+            // It uses the inherited sockfd to send the reply.
+            process_client_request(sockfd, request_buf, bytes_received, client_addr, client_addr_len);
+            // process_client_request calls exit()
+        } else { // Parent process
+            // Parent continues to listen for new requests
         }
-
-        snprintf(buffer, BUF_SIZE, "Client #%d result: %.2lf", client_id, result);
-        sendto(sockfd, buffer, strlen(buffer), 0, (struct sockaddr *)&client_addr, addr_len);
-
-    receive_next:
-        int n = recvfrom(sockfd, buffer, BUF_SIZE, 0, (struct sockaddr *)&client_addr, &addr_len);
-        if (n <= 0) break;
-        buffer[n] = '\0';
-        strcpy(initial_msg, buffer);  // reuse same logic
     }
 
-    time_t end_time = time(NULL);
-    double duration = difftime(end_time, start_time);
-    printf("Client #%d session ended. Duration: %.0f seconds.\n", client_id, duration);
     close(sockfd);
+    return 0;
 }

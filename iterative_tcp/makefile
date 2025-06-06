@@ -1,21 +1,19 @@
 CC = gcc
-CFLAGS = -Wall -g
+CFLAGS = -Wall -g -I../  # Add include path for headers in root
+LDFLAGS =
 
-SERVER = server
-CLIENT = client
+# Path to common object files (expected to be in root directory)
+COMMON_OBJS = ../rpc_protocol.o ../calculator_ops.o
 
-SERVER_SRC = server.c
-CLIENT_SRC = client.c
+TARGET_SERVER = server
 
-.PHONY: all clean
+all: $(TARGET_SERVER)
 
-all: $(SERVER) $(CLIENT)
-
-$(SERVER): $(SERVER_SRC)
-	$(CC) $(CFLAGS) -o $(SERVER) $(SERVER_SRC)
-
-$(CLIENT): $(CLIENT_SRC)
-	$(CC) $(CFLAGS) -o $(CLIENT) $(CLIENT_SRC)
+$(TARGET_SERVER): server.c $(COMMON_OBJS) ../rpc_protocol.h ../calculator_ops.h
+	$(CC) $(CFLAGS) -o $(TARGET_SERVER) server.c $(COMMON_OBJS) $(LDFLAGS)
 
 clean:
-	rm -f $(SERVER) $(CLIENT)
+	rm -f $(TARGET_SERVER)
+	# Common .o files are not cleaned by this makefile
+
+.PHONY: all clean

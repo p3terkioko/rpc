@@ -1,10 +1,18 @@
-all: client server
+CC = gcc
+CFLAGS = -Wall -g -pthread -I../ # Added -pthread and include path for root
+LDFLAGS = -pthread                 # Added -pthread
 
-client: client.c
-	gcc -Wall -o client client.c
+# Path to common object files (expected to be in root directory)
+COMMON_OBJS = ../rpc_protocol.o ../calculator_ops.o
 
-server: server.c
-	gcc -Wall -pthread -o server server.c
+TARGET_SERVER = server
+
+all: $(TARGET_SERVER)
+
+$(TARGET_SERVER): server.c $(COMMON_OBJS) ../rpc_protocol.h ../calculator_ops.h
+	$(CC) $(CFLAGS) -o $(TARGET_SERVER) server.c $(COMMON_OBJS) $(LDFLAGS)
 
 clean:
-	rm -f client server *.o server.log
+	rm -f $(TARGET_SERVER)
+
+.PHONY: all clean
