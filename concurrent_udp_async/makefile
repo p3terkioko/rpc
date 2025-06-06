@@ -1,16 +1,19 @@
-# Makefile
-
 CC = gcc
-CFLAGS = -Wall
-TARGETS = server client
+CFLAGS = -Wall -g -I../ -I../rpc_core
+LDFLAGS =
 
-all: $(TARGETS)
+# Common object files from the root directory
+COMMON_OBJS = ../rpc_protocol.o ../calculator_ops.o
 
-server: server.c
-	$(CC) $(CFLAGS) server.c -o server
+TARGET_SERVER = server
 
-client: client.c
-	$(CC) $(CFLAGS) client.c -o client
+all: $(TARGET_SERVER)
+
+# Link server.c with common RPC objects. Headers are dependencies for rebuild.
+$(TARGET_SERVER): server.c $(COMMON_OBJS) ../rpc_core/rpc_protocol.h ../rpc_core/calculator_ops.h
+	$(CC) $(CFLAGS) -o $(TARGET_SERVER) server.c $(COMMON_OBJS) $(LDFLAGS)
 
 clean:
-	rm -f $(TARGETS) *.o *.log
+	rm -f $(TARGET_SERVER)
+
+.PHONY: all clean

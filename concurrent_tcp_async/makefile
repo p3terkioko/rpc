@@ -1,13 +1,19 @@
 CC = gcc
-CFLAGS = -Wall -O2
+CFLAGS = -Wall -g -I../ -I../rpc_core
+LDFLAGS =
 
-all: server client
+# Common object files from the root directory
+COMMON_OBJS = ../rpc_protocol.o ../calculator_ops.o
 
-server: server.c
-	$(CC) $(CFLAGS) -o server server.c
+TARGET_SERVER = server
 
-client: client.c
-	$(CC) $(CFLAGS) -o client client.c
+all: $(TARGET_SERVER)
+
+# Link server.c with common RPC objects. Headers are dependencies for rebuild.
+$(TARGET_SERVER): server.c $(COMMON_OBJS) ../rpc_core/rpc_protocol.h ../rpc_core/calculator_ops.h
+	$(CC) $(CFLAGS) -o $(TARGET_SERVER) server.c $(COMMON_OBJS) $(LDFLAGS)
 
 clean:
-	rm -f server client
+	rm -f $(TARGET_SERVER)
+
+.PHONY: all clean

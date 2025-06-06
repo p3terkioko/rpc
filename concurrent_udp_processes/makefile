@@ -1,20 +1,19 @@
-# Makefile for UDP Calculator Client and Server
-
 CC = gcc
-CFLAGS = -Wall -Wextra -O2
+CFLAGS = -Wall -g -I../ -I../rpc_core
+LDFLAGS =
 
-# Targets
-all: client server
+# Common object files from the root directory
+COMMON_OBJS = ../rpc_protocol.o ../calculator_ops.o
 
-client: client.c
-	$(CC) $(CFLAGS) -o client client.c
+TARGET_SERVER = server
 
-server: server.c
-	$(CC) $(CFLAGS) -o server server.c
+all: $(TARGET_SERVER)
 
-# Clean up
+# Link server.c with common RPC objects. Headers are dependencies for rebuild.
+$(TARGET_SERVER): server.c $(COMMON_OBJS) ../rpc_core/rpc_protocol.h ../rpc_core/calculator_ops.h
+	$(CC) $(CFLAGS) -o $(TARGET_SERVER) server.c $(COMMON_OBJS) $(LDFLAGS)
+
 clean:
-	rm -f client server *.o
+	rm -f $(TARGET_SERVER)
 
-# Phony targets
 .PHONY: all clean
