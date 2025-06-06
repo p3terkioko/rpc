@@ -3,6 +3,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <netinet/in.h> // For IPPROTO_TCP, IPPROTO_UDP
+#include <unistd.h>     // For getpid()
 
 #include "rpc_core/client_stubs.h" // Contains RpcCallResult and stub functions
 
@@ -27,16 +28,26 @@ ServerEndpoint known_servers[] = {
 };
 int num_known_servers = sizeof(known_servers) / sizeof(known_servers[0]);
 
-// Static variable to keep track of the next server index for round-robin
-static int next_server_index = 0;
+// Static variable to keep track of the next server index for round-robin.
+// Initialized to -1 to signal it needs to be set by PID on first run.
+static int next_server_index = -1;
 
 int main() {
     int choice;
     double a, b;
     RpcCallResult rpc_res;
 
+    // Initialize next_server_index based on PID if it's the first time (or for this process instance)
+    if (next_server_index == -1) {
+        if (num_known_servers > 0) { // Avoid division by zero if list is empty
+            next_server_index = getpid() % num_known_servers;
+        } else {
+            next_server_index = 0; // Default if no servers, though program would be useless
+        }
+    }
+
     while (1) {
-        printf("\n===== RPC CALCULATOR CLIENT (Round-Robin) =====\n");
+        printf("\n===== RPC CALCULATOR CLIENT (PID-Randomized Round-Robin) =====\n");
         printf("1. Add\n");
         printf("2. Subtract\n");
         printf("3. Multiply\n");
@@ -71,6 +82,7 @@ int main() {
 
         int operation_handled = 0;
 
+        // Round-robin server selection loop
         for (int j = 0; j < num_known_servers; ++j) {
             int current_server_idx_to_try = (next_server_index + j) % num_known_servers;
             ServerEndpoint current_server = known_servers[current_server_idx_to_try];
@@ -109,7 +121,9 @@ int main() {
 
         if (!operation_handled) {
             printf("Operation failed. All known servers tried or none could complete the request according to round-robin attempt.\n");
-            next_server_index = (next_server_index + 1) % num_known_servers;
+            if (num_known_servers > 0) { // Avoid issues if list is empty
+                next_server_index = (next_server_index + 1) % num_known_servers;
+            }
         }
     }
 
