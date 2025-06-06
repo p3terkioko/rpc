@@ -3,7 +3,7 @@
 #include <string.h>
 #include <netinet/in.h> // For IPPROTO_TCP, IPPROTO_UDP
 
-#include "client_stubs.h" // Contains RpcCallResult and stub functions
+#include "rpc_core/client_stubs.h" // Contains RpcCallResult and stub functions
 
 // Define server endpoint configurations
 typedef struct {
