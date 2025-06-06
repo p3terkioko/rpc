@@ -1,3 +1,4 @@
+// Content for rpc_client.c
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -14,18 +15,20 @@ typedef struct {
 } ServerEndpoint;
 
 // List of known servers
-// For simplicity, using localhost. Ports need to match server implementations.
 ServerEndpoint known_servers[] = {
     {"Iterative TCP Server", "127.0.0.1", 9001, IPPROTO_TCP},
     {"Concurrent TCP Threads Server", "127.0.0.1", 9002, IPPROTO_TCP},
     {"Concurrent TCP Processes Server", "127.0.0.1", 9003, IPPROTO_TCP},
-    {"Concurrent TCP Async Server", "127.0.0.1", 9004, IPPROTO_TCP}, // Assuming standard TCP interaction from client stub
+    {"Concurrent TCP Async Server", "127.0.0.1", 9004, IPPROTO_TCP},
     {"Iterative UDP Server", "127.0.0.1", 9005, IPPROTO_UDP},
     {"Concurrent UDP Threads Server", "127.0.0.1", 9006, IPPROTO_UDP},
     {"Concurrent UDP Processes Server", "127.0.0.1", 9007, IPPROTO_UDP},
-    {"Concurrent UDP Async Server", "127.0.0.1", 9008, IPPROTO_UDP}  // Assuming standard UDP interaction from client stub
+    {"Concurrent UDP Async Server", "127.0.0.1", 9008, IPPROTO_UDP}
 };
 int num_known_servers = sizeof(known_servers) / sizeof(known_servers[0]);
+
+// Static variable to keep track of the next server index for round-robin
+static int next_server_index = 0;
 
 int main() {
     int choice;
@@ -33,7 +36,7 @@ int main() {
     RpcCallResult rpc_res;
 
     while (1) {
-        printf("\n===== RPC CALCULATOR CLIENT =====\n");
+        printf("\n===== RPC CALCULATOR CLIENT (Round-Robin) =====\n");
         printf("1. Add\n");
         printf("2. Subtract\n");
         printf("3. Multiply\n");
@@ -66,48 +69,47 @@ int main() {
         }
         while (getchar() != '\n'); // Clear trailing newline
 
-        int operation_performed = 0;
-        for (int i = 0; i < num_known_servers; ++i) {
+        int operation_handled = 0;
+
+        for (int j = 0; j < num_known_servers; ++j) {
+            int current_server_idx_to_try = (next_server_index + j) % num_known_servers;
+            ServerEndpoint current_server = known_servers[current_server_idx_to_try];
+
             printf("\nAttempting operation with %s (%s:%d)...\n",
-                   known_servers[i].name, known_servers[i].ip, known_servers[i].port);
+                   current_server.name, current_server.ip, current_server.port);
 
             switch (choice) {
                 case 1:
-                    rpc_res = rpc_add(a, b, known_servers[i].ip, known_servers[i].port, known_servers[i].protocol);
+                    rpc_res = rpc_add(a, b, current_server.ip, current_server.port, current_server.protocol);
                     break;
                 case 2:
-                    rpc_res = rpc_subtract(a, b, known_servers[i].ip, known_servers[i].port, known_servers[i].protocol);
+                    rpc_res = rpc_subtract(a, b, current_server.ip, current_server.port, current_server.protocol);
                     break;
                 case 3:
-                    rpc_res = rpc_multiply(a, b, known_servers[i].ip, known_servers[i].port, known_servers[i].protocol);
+                    rpc_res = rpc_multiply(a, b, current_server.ip, current_server.port, current_server.protocol);
                     break;
                 case 4:
-                    rpc_res = rpc_divide(a, b, known_servers[i].ip, known_servers[i].port, known_servers[i].protocol);
+                    rpc_res = rpc_divide(a, b, current_server.ip, current_server.port, current_server.protocol);
                     break;
-                default: // Should not happen due to earlier check
-                    fprintf(stderr, "Internal error: Invalid choice in switch.\n");
-                    continue;
             }
 
             if (rpc_res.call_success) {
-                if (rpc_res.error[0] == '\0') { // Server processed without error
+                if (rpc_res.error[0] == '\0') {
                     printf("SUCCESS! Result from %s: %.2lf\n", rpc_res.server_type_handled, rpc_res.result);
-                    operation_performed = 1;
-                } else { // Server returned an error (e.g., division by zero)
+                } else {
                     printf("Server %s reported an error: %s\n", rpc_res.server_type_handled, rpc_res.error);
-                    // This is still a "successful" RPC call in that we got a response,
-                    // but the operation itself failed. We can consider this as handled.
-                    operation_performed = 1;
                 }
-                break; // Exit loop once an operation is successfully processed or server returns a specific error
+                operation_handled = 1;
+                next_server_index = (current_server_idx_to_try + 1) % num_known_servers;
+                break;
             } else {
-                printf("Failed to connect or get response from %s: %s\n", known_servers[i].name, rpc_res.error);
-                // Try next server
+                printf("Failed to connect or get response from %s: %s\n", current_server.name, rpc_res.error);
             }
         }
 
-        if (!operation_performed) {
-            printf("Operation failed. All known servers tried or none could complete the request.\n");
+        if (!operation_handled) {
+            printf("Operation failed. All known servers tried or none could complete the request according to round-robin attempt.\n");
+            next_server_index = (next_server_index + 1) % num_known_servers;
         }
     }
 
